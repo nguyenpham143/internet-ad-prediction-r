@@ -1,68 +1,152 @@
 # Data cleaning pipeline for the Internet Advertisements assignment.
-# This script reads the raw add.csv file, keeps the variables used in the
-# report, imputes missing values, recalculates Aspect_ratio, and exports
-# preprocessed.csv to the same folder as this script.
+# Usage:
+#   Rscript data_cleaning.r [optional_input_csv] [optional_output_csv]
+
+decode_script_path <- function(path) {
+    # Some Rscript invocations encode spaces as "~+~" inside --file=.
+    gsub("~\\+~", " ", path)
+}
 
 get_script_dir <- function() {
     args <- commandArgs(trailingOnly = FALSE)
     file_arg <- grep("^--file=", args, value = TRUE)
 
     if (length(file_arg) > 0) {
-        return(dirname(normalizePath(sub("^--file=", "", file_arg[1]))))
+        script_path <- decode_script_path(sub("^--file=", "", file_arg[1]))
+        if (file.exists(script_path)) {
+            return(dirname(normalizePath(script_path, winslash = "/", mustWork = TRUE)))
+        }
     }
 
-    normalizePath(getwd())
+    frame_path <- tryCatch(sys.frames()[[1]]$ofile, error = function(...) NULL)
+    if (!is.null(frame_path) && file.exists(frame_path)) {
+        return(dirname(normalizePath(frame_path, winslash = "/", mustWork = TRUE)))
+    }
+
+    normalizePath(getwd(), winslash = "/", mustWork = TRUE)
+}
+
+coerce_numeric_checked <- function(column, column_name) {
+    original_na <- is.na(column)
+    numeric_column <- suppressWarnings(as.numeric(column))
+    introduced_na <- is.na(numeric_column) & !original_na
+
+    if (any(introduced_na)) {
+        bad_values <- unique(column[introduced_na])
+        stop(
+            "Unexpected non-numeric values found in ",
+            column_name,
+            ": ",
+            paste(bad_values, collapse = ", ")
+        )
+    }
+
+    numeric_column
+}
+
+standardize_character_column <- function(column) {
+    if (!is.character(column)) {
+        return(column)
+    }
+
+    trimmed_column <- trimws(column)
+    trimmed_column[trimmed_column == "?"] <- NA
+    trimmed_column
+}
+
+print_summary_table <- function(data_frame) {
+    summary_object <- summary(data_frame)
+    print(summary_object)
 }
 
 script_dir <- get_script_dir()
 project_root <- normalizePath(file.path(script_dir, ".."), winslash = "/", mustWork = TRUE)
 
+cli_args <- commandArgs(trailingOnly = TRUE)
+input_override <- if (length(cli_args) >= 1) cli_args[1] else NULL
+output_override <- if (length(cli_args) >= 2) cli_args[2] else NULL
+
+if (length(cli_args) > 2) {
+    warning("Ignoring extra command-line arguments after the output path.")
+}
+
 input_candidates <- c(
+    if (!is.null(input_override)) input_override,
     file.path(script_dir, "add.csv"),
-    file.path(project_root, "add.csv"),
-    file.path(project_root, "251-Probability-and-Statistics-project-main", "add.csv")
+    file.path(project_root, "add.csv")
 )
+input_candidates <- unique(input_candidates)
 
 existing_inputs <- input_candidates[file.exists(input_candidates)]
 if (length(existing_inputs) == 0) {
     stop("Cannot find add.csv. Checked: ", paste(input_candidates, collapse = ", "))
 }
 
-input_file <- existing_inputs[1]
-output_file <- file.path(script_dir, "preprocessed.csv")
+input_file <- normalizePath(existing_inputs[1], winslash = "/", mustWork = TRUE)
+output_file <- if (is.null(output_override)) {
+    file.path(script_dir, "preprocessed.csv")
+} else {
+    output_override
+}
+output_file <- normalizePath(output_file, winslash = "/", mustWork = FALSE)
 
 raw_data <- read.csv(
     file = input_file,
     header = TRUE,
     sep = ",",
     check.names = FALSE,
-    stringsAsFactors = FALSE
+    stringsAsFactors = FALSE,
+    na.strings = "?"
 )
 
-if (ncol(raw_data) != 1560L) {
-    stop("Unexpected number of columns in raw data: ", ncol(raw_data), ". Expected 1560.")
+expected_column_count <- 1560L
+if (ncol(raw_data) != expected_column_count) {
+    stop(
+        "Unexpected number of columns in raw data: ",
+        ncol(raw_data),
+        ". Expected ",
+        expected_column_count,
+        "."
+    )
 }
 
-data <- raw_data[, -c(1, 6:1559)]
+selected_column_indices <- c(2L, 3L, 4L, 5L, 1560L)
+data <- raw_data[, selected_column_indices]
 colnames(data) <- c("Height", "Width", "Aspect_ratio", "Local", "Is_Ad")
+data[] <- lapply(data, standardize_character_column)
 
-data <- as.data.frame(lapply(data, function(col) {
-    ifelse(grepl("\\?", col), NA, col)
-}), stringsAsFactors = FALSE)
+valid_labels <- c("ad.", "nonad.")
+observed_labels <- sort(unique(na.omit(data$Is_Ad)))
+if (!all(observed_labels %in% valid_labels)) {
+    stop(
+        "Unexpected target labels found in Is_Ad: ",
+        paste(observed_labels, collapse = ", ")
+    )
+}
 
 data$Is_Ad <- ifelse(data$Is_Ad == "ad.", 1, 0)
-data <- as.data.frame(lapply(data, as.numeric))
+
+for (col in c("Height", "Width", "Aspect_ratio", "Local")) {
+    data[[col]] <- coerce_numeric_checked(data[[col]], col)
+}
+data$Is_Ad <- as.numeric(data$Is_Ad)
 
 summary_before <- summary(data)
 na_count <- sapply(data, function(col) sum(is.na(col)))
 na_percentage <- round(na_count / nrow(data) * 100, 2)
 
-for (col in c("Height", "Width")) {
-    data[[col]][is.na(data[[col]])] <- median(data[[col]], na.rm = TRUE)
-}
+height_median <- median(data$Height, na.rm = TRUE)
+width_median <- median(data$Width, na.rm = TRUE)
+local_mode_proxy <- round(mean(data$Local, na.rm = TRUE))
 
-data$Local[is.na(data$Local)] <- round(mean(data$Local, na.rm = TRUE))
+data$Height[is.na(data$Height)] <- height_median
+data$Width[is.na(data$Width)] <- width_median
+data$Local[is.na(data$Local)] <- local_mode_proxy
 data$Aspect_ratio <- round(data$Width / data$Height, 4)
+
+if (any(data$Height <= 0, na.rm = TRUE)) {
+    stop("Height must remain strictly positive after cleaning.")
+}
 
 if (anyNA(data)) {
     stop("The cleaned dataset still contains missing values.")
@@ -86,7 +170,14 @@ print(data.frame(
     row.names = NULL
 ))
 
+cat("\nImputation values used:\n")
+print(data.frame(
+    Variable = c("Height", "Width", "Local"),
+    Replacement = c(height_median, width_median, local_mode_proxy),
+    row.names = NULL
+))
+
 cat("\nSummary after imputation:\n")
-print(summary(data))
+print_summary_table(data)
 
 cat("\nRemaining missing values after cleaning:", sum(is.na(data)), "\n")
