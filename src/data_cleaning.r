@@ -72,6 +72,9 @@ if (length(cli_args) > 2) {
 
 input_candidates <- c(
     if (!is.null(input_override)) input_override,
+    file.path(project_root, "data", "add.csv"),
+    file.path(script_dir, "..", "data", "add.csv"),
+    file.path(script_dir, "data", "add.csv"),
     file.path(script_dir, "add.csv"),
     file.path(project_root, "add.csv")
 )
@@ -84,7 +87,11 @@ if (length(existing_inputs) == 0) {
 
 input_file <- normalizePath(existing_inputs[1], winslash = "/", mustWork = TRUE)
 output_file <- if (is.null(output_override)) {
-    file.path(script_dir, "preprocessed.csv")
+    if (dir.exists(file.path(project_root, "data"))) {
+        file.path(project_root, "data", "preprocessed.csv")
+    } else {
+        file.path(script_dir, "preprocessed.csv")
+    }
 } else {
     output_override
 }

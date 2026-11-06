@@ -82,6 +82,9 @@ if (length(cli_args) > 2) {
 
 input_candidates <- c(
     if (!is.null(input_override)) input_override,
+    file.path(project_root, "data", "add.csv"),
+    file.path(script_dir, "..", "data", "add.csv"),
+    file.path(script_dir, "data", "add.csv"),
     file.path(script_dir, "add.csv"),
     file.path(project_root, "add.csv")
 )
@@ -94,7 +97,11 @@ if (length(existing_inputs) == 0) {
 
 input_file <- normalizePath(existing_inputs[1], winslash = "/", mustWork = TRUE)
 output_file <- if (is.null(output_override)) {
-    file.path(script_dir, "preprocessed.csv")
+    if (dir.exists(file.path(project_root, "data"))) {
+        file.path(project_root, "data", "preprocessed.csv")
+    } else {
+        file.path(script_dir, "preprocessed.csv")
+    }
 } else {
     output_override
 }
@@ -197,7 +204,17 @@ print("2. Running descriptive_statistics.r ...")
 library(ggplot2)
 library(dplyr)
 
-df <- read.csv("preprocessed.csv", stringsAsFactors = FALSE)
+prep_file_candidates <- c(
+    output_file,
+    file.path(project_root, "data", "preprocessed.csv"),
+    file.path(script_dir, "..", "data", "preprocessed.csv"),
+    "data/preprocessed.csv",
+    "preprocessed.csv"
+)
+prep_existing <- prep_file_candidates[file.exists(prep_file_candidates)]
+prep_input <- if (length(prep_existing) > 0) prep_existing[1] else "preprocessed.csv"
+
+df <- read.csv(prep_input, stringsAsFactors = FALSE)
 
 dim(df)
 names(df)
@@ -368,7 +385,7 @@ library(car)
 
 set.seed(1)
 
-ads_data <- read.csv(file = "preprocessed.csv", header = TRUE, sep = ",")
+ads_data <- read.csv(file = prep_input, header = TRUE, sep = ",")
 
 train_index <- sample.split(ads_data$Is_Ad, SplitRatio = 0.8)
 

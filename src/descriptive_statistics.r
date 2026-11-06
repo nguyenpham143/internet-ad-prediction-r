@@ -1,7 +1,10 @@
 library(ggplot2)
 library(dplyr)
 
-df <- read.csv("preprocessed.csv", stringsAsFactors = FALSE)
+prep_candidates <- c("data/preprocessed.csv", "../data/preprocessed.csv", "preprocessed.csv")
+prep_file <- prep_candidates[file.exists(prep_candidates)][1]
+if (is.na(prep_file)) prep_file <- "preprocessed.csv"
+df <- read.csv(prep_file, stringsAsFactors = FALSE)
 
 dim(df)
 names(df)
